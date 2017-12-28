@@ -8,6 +8,7 @@ import (
 	"github.com/livego/concurrent-map"
 	"github.com/livego/configure"
 	log "github.com/livego/logging"
+	"github.com/livego/protocol/httpflv"
 	"github.com/livego/protocol/rtmp"
 	"github.com/livego/protocol/rtmp/rtmprelay"
 	"io"
@@ -31,6 +32,11 @@ func (r *Response) SendJson() (int, error) {
 	resp, _ := json.Marshal(r)
 	r.w.Header().Set("Content-Type", "application/json")
 	return r.w.Write(resp)
+}
+
+type HttpRetInfo struct {
+	ErrCode int    `json:"errcode"`
+	Dscr    string `json:"dscr"`
 }
 
 type Operation struct {
@@ -146,13 +152,13 @@ func (s *Server) Serve(l net.Listener) error {
 
 type Stream struct {
 	Key             string `json:"key"`
-	Url             string `json:"Url"`
-	PeerIP          string `json:"PeerIP"`
-	StreamId        uint32 `json:"StreamId"`
-	VideoTotalBytes uint64 `json:123456`
-	VideoSpeed      uint64 `json:123456`
-	AudioTotalBytes uint64 `json:123456`
-	AudioSpeed      uint64 `json:123456`
+	Url             string `json:"url"`
+	PeerIP          string `json:"peerip"`
+	StreamId        uint32 `json:"streamid"`
+	VideoTotalBytes uint64 `json:videototal`
+	VideoSpeed      uint64 `json:videospeed`
+	AudioTotalBytes uint64 `json:audiototal`
+	AudioSpeed      uint64 `json:audiospeed`
 }
 
 type Streams struct {
@@ -196,6 +202,12 @@ func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 					switch pw.GetWriter().(type) {
 					case *rtmp.VirWriter:
 						v := pw.GetWriter().(*rtmp.VirWriter)
+						msg := Stream{item.Key, v.Info().URL, v.WriteBWInfo.PeerIP, v.WriteBWInfo.StreamId, v.WriteBWInfo.VideoDatainBytes, v.WriteBWInfo.VideoSpeedInBytesperMS,
+							v.WriteBWInfo.AudioDatainBytes, v.WriteBWInfo.AudioSpeedInBytesperMS}
+						msgs.Players = append(msgs.Players, msg)
+						msgs.PlayerNumber++
+					case *httpflv.FLVWriter:
+						v := pw.GetWriter().(*httpflv.FLVWriter)
 						msg := Stream{item.Key, v.Info().URL, v.WriteBWInfo.PeerIP, v.WriteBWInfo.StreamId, v.WriteBWInfo.VideoDatainBytes, v.WriteBWInfo.VideoSpeedInBytesperMS,
 							v.WriteBWInfo.AudioDatainBytes, v.WriteBWInfo.AudioSpeedInBytesperMS}
 						msgs.Players = append(msgs.Players, msg)
@@ -461,7 +473,7 @@ func (s *Server) handlePullflv(w http.ResponseWriter, req *http.Request) {
 
 	log.Infof("control pullflv: oper=%v, app=%v, name=%v, url=%v", oper, app, name, url)
 	if (len(app) <= 0) || (len(name) <= 0) || (len(url) <= 0) {
-		io.WriteString(w, "control push parameter error, please check them.</br>")
+		s.SendBack(w, 500, "control push flv parameter error, please check them")
 		return
 	}
 
@@ -474,17 +486,22 @@ func (s *Server) handlePullflv(w http.ResponseWriter, req *http.Request) {
 
 		if !found {
 			retString = fmt.Sprintf("sessionFlv key[%s] not exist, please check it again.", keyString)
-			io.WriteString(w, retString)
+			s.SendBack(w, 500, retString)
 			return
 		}
 		log.Infof("flvpull stop push %s from %s", remoteurl, localurl)
 		pullFlvrelay.Stop()
 
 		delete(s.sessionFlv, keyString)
-		retString = fmt.Sprintf("<h1>push url stop %s ok</h1></br>", url[0])
-		io.WriteString(w, retString)
+		retString = fmt.Sprintf("push url stop %s ok", url[0])
+		s.SendBack(w, 200, retString)
 		log.Infof("flvpull stop return %s", retString)
 	} else {
+		_, found := s.sessionFlv[keyString]
+		if found {
+			s.SendBack(w, 500, fmt.Sprintf("%s already exist", keyString))
+			return
+		}
 		pullFlvrelay := rtmprelay.NewFlvPull(&localurl, &remoteurl)
 		log.Infof("flvpull start push %s from %s", remoteurl, localurl)
 		err = pullFlvrelay.Start()
@@ -492,9 +509,9 @@ func (s *Server) handlePullflv(w http.ResponseWriter, req *http.Request) {
 			retString = fmt.Sprintf("push error=%v", err)
 		} else {
 			s.sessionFlv[keyString] = pullFlvrelay
-			retString = fmt.Sprintf("<h1>push url start %s ok</h1></br>", url[0])
+			retString = fmt.Sprintf("push url start %s ok", url[0])
 		}
-		io.WriteString(w, retString)
+		s.SendBack(w, 200, retString)
 		log.Infof("flvpull start return %s", retString)
 	}
 }
@@ -513,7 +530,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 
 	log.Infof("control pull: oper=%v, app=%v, name=%v, url=%v", oper, app, name, url)
 	if (len(app) <= 0) || (len(name) <= 0) || (len(url) <= 0) {
-		io.WriteString(w, "control push parameter error, please check them.</br>")
+		s.SendBack(w, 500, "control parameter error, please check them")
 		return
 	}
 
@@ -526,17 +543,23 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 
 		if !found {
 			retString = fmt.Sprintf("session key[%s] not exist, please check it again.", keyString)
-			io.WriteString(w, retString)
+			s.SendBack(w, 500, retString)
 			return
 		}
 		log.Infof("rtmprelay stop push %s from %s", remoteurl, localurl)
 		pullRtmprelay.Stop()
 
 		delete(s.session, keyString)
-		retString = fmt.Sprintf("<h1>push url stop %s ok</h1></br>", url[0])
-		io.WriteString(w, retString)
+		retString = fmt.Sprintf("push url stop %s ok", url[0])
+		s.SendBack(w, 200, retString)
 		log.Infof("pull stop return %s", retString)
 	} else {
+		_, found := s.session[keyString]
+		if found {
+			s.SendBack(w, 500, fmt.Sprintf("%s already exist", keyString))
+			return
+		}
+
 		pullRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
 		log.Infof("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pullRtmprelay.Start()
@@ -544,14 +567,24 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 			retString = fmt.Sprintf("push error=%v", err)
 		} else {
 			s.session[keyString] = pullRtmprelay
-			retString = fmt.Sprintf("<h1>push url start %s ok</h1></br>", url[0])
+			retString = fmt.Sprintf("push url start %s ok", url[0])
 		}
-		io.WriteString(w, retString)
+		s.SendBack(w, 200, retString)
 		log.Infof("pull start return %s", retString)
 	}
 }
 
-//http://127.0.0.1:8090/control/push?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456
+func (s *Server) SendBack(w http.ResponseWriter, errCode int, errDscr string) {
+	var retInfo HttpRetInfo
+	var data []byte
+	retInfo.ErrCode = errCode
+	retInfo.Dscr = errDscr
+
+	data, _ = json.Marshal(retInfo)
+	io.WriteString(w, string(data))
+}
+
+//http://127.0.0.1:8070/control/push?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456
 func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 	var retString string
 	var err error
@@ -565,7 +598,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 
 	log.Infof("control push: oper=%v, app=%v, name=%v, url=%v", oper, app, name, url)
 	if (len(app) <= 0) || (len(name) <= 0) || (len(url) <= 0) {
-		io.WriteString(w, "control push parameter error, please check them.</br>")
+		s.SendBack(w, 500, "control push parameter error, please check them")
 		return
 	}
 
@@ -576,29 +609,34 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 	if oper[0] == "stop" {
 		pushRtmprelay, found := s.session[keyString]
 		if !found {
-			retString = fmt.Sprintf("<h1>session key[%s] not exist, please check it again.</h1>", keyString)
-			io.WriteString(w, retString)
+			retString = fmt.Sprintf("session key[%s] not exist, please check it again", keyString)
+			s.SendBack(w, 500, retString)
 			return
 		}
 		log.Infof("rtmprelay stop push %s from %s", remoteurl, localurl)
 		pushRtmprelay.Stop()
 
 		delete(s.session, keyString)
-		retString = fmt.Sprintf("<h1>push url stop %s ok</h1></br>", url[0])
-		io.WriteString(w, retString)
+		retString = fmt.Sprintf("push url stop %s ok", url[0])
+		s.SendBack(w, 200, retString)
 		log.Infof("push stop return %s", retString)
 	} else {
+		_, found := s.session[keyString]
+		if found {
+			s.SendBack(w, 500, fmt.Sprintf("%s already exist", keyString))
+			return
+		}
 		pushRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
 		log.Infof("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pushRtmprelay.Start()
 		if err != nil {
 			retString = fmt.Sprintf("push error=%v", err)
 		} else {
-			retString = fmt.Sprintf("<h1>push url start %s ok</h1></br>", url[0])
+			retString = fmt.Sprintf("push url start %s ok", url[0])
 			s.session[keyString] = pushRtmprelay
 		}
 
-		io.WriteString(w, retString)
+		s.SendBack(w, 200, retString)
 		log.Infof("push start return %s", retString)
 	}
 }

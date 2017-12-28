@@ -12,6 +12,8 @@ import (
 	"github.com/livego/protocol/rtmp"
 	"github.com/livego/protocol/rtmp/rtmprelay"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"time"
 )
 
@@ -157,6 +159,12 @@ func startHTTPOpera(stream *rtmp.RtmpStream, l net.Listener) net.Listener {
 	return opListen
 }
 
+func InitPprof() {
+	go func() {
+		log.Info(http.ListenAndServe("localhost:6399", nil))
+	}()
+}
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -170,6 +178,8 @@ func main() {
 	if err != nil {
 		return
 	}
+
+	InitPprof()
 
 	var hlsServer *hls.Server
 	//var hlsListener net.Listener
@@ -192,6 +202,7 @@ func main() {
 			return
 		} else {
 			//log.Info("not equal", "hls port", configure.GetHlsPort(), "http flv port", configure.GetHttpFlvPort())
+			log.Info("startHTTPFlv...")
 			startHTTPFlv(stream, nil)
 		}
 	}

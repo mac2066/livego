@@ -23,21 +23,19 @@ import (
         "exec_push":["./helloworld1", "./helloworld2"],
         "exec_push_done":["./helloworld1", "./helloworld2"],
         "report":["127.0.0.1"],
-	    "static_push":[{"master_prefix":"live/trans/inke/mlinkm", "upstream":"rtmp://inke.8686c.com/"}],
-	    "static_pull":[{"type":"http-flv",
-	                    "source":"http://pull99.a8.com/live/1500365043587794.flv",
-	                    "app":"live",
-	                    "stream":"1500365043587794"},
-	                    {"type":"rtmp",
-	                    "source":"rtmp://pull99.a8.com/live/1500365043587794",
-	                    "app":"live",
-	                    "stream":"1500365043587794"}
-	                  ],
-	    "sub_static_push":[{"master_prefix":"live/trans/inke/mlinkm", "sub_prefix":"live/trans/inke/mlinks"}]
+	    "record":[{"master_prefix":"live", "type":"flv",
+                   "path":"/Users/xxxx/Documents/record"}]
         }
     ]
 }
 */
+
+type RecordConfig struct {
+	Master_prefix string `json:"master_prefix"`
+	Recordtype    string `json:"type"`
+	Path          string `json:"path"`
+}
+
 type SubStaticPush struct {
 	Master_prefix string
 	Sub_prefix    string
@@ -63,6 +61,7 @@ type ServerInfo struct {
 	Static_push     []StaticPushInfo
 	Static_pull     []StaticPullInfo
 	Sub_static_push []SubStaticPush
+	Recordcfg       []RecordConfig `json:"record"`
 }
 
 type ServerCfg struct {
@@ -117,6 +116,35 @@ func LoadConfig(configfilename string) error {
 	}
 
 	return nil
+}
+
+func GetRecordCfg() (retList []RecordConfig) {
+	retList = nil
+
+	for _, serverItem := range RtmpServercfg.Servers {
+		if serverItem.Recordcfg == nil || len(serverItem.Recordcfg) == 0 {
+			continue
+		}
+		retList = append(retList, serverItem.Recordcfg...)
+	}
+	return
+}
+
+func IsRecordEnable(publishUrl string) (bool, RecordConfig) {
+	var recCfg RecordConfig
+	isEnable := false
+	for _, serverItem := range RtmpServercfg.Servers {
+		for _, recItem := range serverItem.Recordcfg {
+			if strings.Contains(publishUrl, recItem.Master_prefix) {
+				isEnable = true
+				recCfg = recItem
+				break
+			}
+
+		}
+		break
+	}
+	return isEnable, recCfg
 }
 
 func GetReportList() []string {
