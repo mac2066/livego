@@ -92,13 +92,13 @@ func (connClient *ConnClient) readRespMsg() error {
 				case string:
 					switch connClient.curcmdName {
 					case cmdConnect, cmdCreateStream:
-						if v.(string) != respResult {
-							return errors.New(v.(string))
+						if v.(string) != respResult && v.(string) != onBWDone {
+							return errors.New(fmt.Sprintf("createstream return unknow type:%s", v.(string)))
 						}
 
 					case cmdPublish:
-						if v.(string) != onStatus {
-							return ErrFail
+						if v.(string) != onStatus && v.(string) != respResult {
+							return errors.New(fmt.Sprintf("publish return unknow type:%s", v.(string)))
 						}
 					}
 				case float64:
@@ -108,15 +108,18 @@ func (connClient *ConnClient) readRespMsg() error {
 
 						if k == 1 {
 							if id != connClient.transID {
-								return ErrFail
+								//return errors.New(fmt.Sprintf("%s return unknow transid:%d, connClient.transID=%d",
+								//	connClient.curcmdName, id, connClient.transID))
+								log.Infof("%s return unknow transid:%d, connClient.transID=%d",
+									connClient.curcmdName, id, connClient.transID)
 							}
 						} else if k == 3 {
 							connClient.streamid = uint32(id)
 							log.Infof("connClient.streamid=%d", connClient.streamid)
 						}
 					case cmdPublish:
-						if int(v.(float64)) != 0 {
-							return ErrFail
+						if int(v.(float64)) != 0 && int(v.(float64)) != 1 && int(v.(float64)) != 2 {
+							return errors.New(fmt.Sprintf("publish return unknow float:%f", v.(float64)))
 						}
 					}
 				case amf.Object:
@@ -125,12 +128,12 @@ func (connClient *ConnClient) readRespMsg() error {
 					case cmdConnect:
 						code, ok := objmap["code"]
 						if ok && code.(string) != connectSuccess {
-							return ErrFail
+							return errors.New(fmt.Sprintf("connect return unknow code:%s", code.(string)))
 						}
 					case cmdPublish:
 						code, ok := objmap["code"]
 						if ok && code.(string) != publishStart {
-							return ErrFail
+							return errors.New(fmt.Sprintf("publish return unknow code:%s", code.(string)))
 						}
 					}
 				}
