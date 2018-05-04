@@ -84,6 +84,19 @@ func SetFlags(flags int) {
 	_log._log.SetFlags(flags)
 }
 
+func InfoBody(data []byte, dscr string) {
+	output_string := dscr
+
+	for index, item_uchar := range data {
+		if index%16 == 0 {
+			output_string += fmt.Sprintf("\r\n")
+		}
+		output_string += fmt.Sprintf(" %02x", item_uchar)
+	}
+
+	_log.Info(output_string)
+}
+
 func Info(v ...interface{}) {
 	_log.Info(v...)
 }
