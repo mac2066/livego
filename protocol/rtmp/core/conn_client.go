@@ -165,6 +165,42 @@ func (connClient *ConnClient) writeSubMsg(index int, args ...interface{}) error 
 	return connClient.conn.Flush()
 }
 
+func (connClient *ConnClient) WriteBaseMeta(version string, fps int, width int, height int, samplerate int, samplesize int) error {
+	connClient.bytesw.Reset()
+
+	meta_name := "onMetadata"
+	_, err := connClient.encoder.Encode(connClient.bytesw, meta_name, amf.AMF0)
+	if err != nil {
+		log.Errorf("WriteBaseMeta encode error:%v", err)
+		return err
+	}
+	obj := make(amf.Object)
+	obj["version"] = version
+	obj["fps"] = fps
+	obj["width"] = width
+	obj["height"] = height
+	obj["audiosamplerate"] = samplerate
+	obj["audiosamplesize"] = samplesize
+	_, err = connClient.encoder.EncodeAmf0EcmaArray(connClient.bytesw, obj, true)
+	if err != nil {
+		log.Errorf("WriteBaseMeta EncodeAmf0EcmaArray error:%v", err)
+		return err
+	}
+
+	msg := connClient.bytesw.Bytes()
+	c := ChunkStream{
+		Format:    0,
+		CSID:      3,
+		Timestamp: 0,
+		TypeID:    18,
+		StreamID:  connClient.streamid,
+		Length:    uint32(len(msg)),
+		Data:      msg,
+	}
+	connClient.conn.Write(&c)
+	return connClient.conn.Flush()
+}
+
 func (connClient *ConnClient) WriteTimestampMeta(timestamp uint32) error {
 	//log.Printf("WriteTimestampMeta timestamp=%d", timestamp)
 	err := connClient.writeMetaDataMsg(connClient.streamid, "syncTimebase", timestamp)
@@ -410,12 +446,27 @@ func (connClient *ConnClient) StartSubStream(url string, index int, method strin
 	}
 	connClient.suburl[index] = url
 	path := strings.TrimLeft(u.Path, "/")
-	ps := strings.SplitN(path, "/", 2)
-	if len(ps) != 2 {
+
+	name_list := strings.Split(path, "/")
+	if len(name_list) < 2 {
 		return fmt.Errorf("u path err: %s", path)
 	}
-	connClient.subapp[index] = ps[0]
-	connClient.subtitle[index] = ps[1]
+	for index := 0; index < len(name_list)-1; index++ {
+		if index == 0 {
+			connClient.app = fmt.Sprintf("%s", name_list[index])
+		} else {
+			connClient.app = fmt.Sprintf("%s/%s", connClient.app, name_list[index])
+		}
+	}
+	connClient.title = name_list[len(name_list)-1]
+	/*
+		ps := strings.SplitN(path, "/", 2)
+		if len(ps) != 2 {
+			return fmt.Errorf("u path err: %s", path)
+		}
+		connClient.subapp[index] = ps[0]
+		connClient.subtitle[index] = ps[1]
+	*/
 	connClient.subquery[index] = u.RawQuery
 	connClient.subtcurl[index] = "rtmp://" + u.Host + "/" + connClient.subapp[index]
 
@@ -446,12 +497,27 @@ func (connClient *ConnClient) Start(url string, method string) error {
 	}
 	connClient.url = url
 	path := strings.TrimLeft(u.Path, "/")
-	ps := strings.SplitN(path, "/", 2)
-	if len(ps) != 2 {
+
+	name_list := strings.Split(path, "/")
+	if len(name_list) < 2 {
 		return fmt.Errorf("u path err: %s", path)
 	}
-	connClient.app = ps[0]
-	connClient.title = ps[1]
+	for index := 0; index < len(name_list)-1; index++ {
+		if index == 0 {
+			connClient.app = fmt.Sprintf("%s", name_list[index])
+		} else {
+			connClient.app = fmt.Sprintf("%s/%s", connClient.app, name_list[index])
+		}
+	}
+	connClient.title = name_list[len(name_list)-1]
+	/*
+		ps := strings.SplitN(path, "/", 2)
+		if len(ps) != 2 {
+			return fmt.Errorf("u path err: %s", path)
+		}
+		connClient.app = ps[0]
+		connClient.title = ps[1]
+	*/
 	connClient.query = u.RawQuery
 	connClient.tcurl = "rtmp://" + u.Host + "/" + connClient.app
 	port := ":1935"
@@ -493,7 +559,7 @@ func (connClient *ConnClient) Start(url string, method string) error {
 		return err
 	}
 
-	log.Info("connection:", "local:", conn.LocalAddr(), "remote:", conn.RemoteAddr())
+	log.Info("connection:", "local:", conn.LocalAddr(), "remote:", conn.RemoteAddr(), "path:", path, "app:", connClient.app, "title:", connClient.title)
 
 	connClient.conn = NewConn(conn, 4*1024)
 
